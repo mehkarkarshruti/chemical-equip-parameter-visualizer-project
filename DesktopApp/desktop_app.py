@@ -1,11 +1,14 @@
 import sys
-import csv
+import requests
 from collections import Counter
+from datetime import datetime
+import webbrowser
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
-    QFileDialog, QMessageBox, QScrollArea
+    QFileDialog, QMessageBox, QScrollArea, 
+    QTableWidget, QTableWidgetItem
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
@@ -17,6 +20,7 @@ from matplotlib.figure import Figure
 class EquipmentVisualizer(QWidget):
     def __init__(self):
         super().__init__()
+        self.load_history()
         self.setWindowTitle("Chemical Equipment Parameter Visualizer")
         self.setMinimumSize(1200, 780)
         self.setStyleSheet("background-color: #f5f7fa;")
@@ -49,7 +53,7 @@ class EquipmentVisualizer(QWidget):
 
         # Upload card
         upload_card = self.card()
-        self.upload_card = upload_card  # keep reference
+        self.upload_card = upload_card
         upload = QHBoxLayout(upload_card)
 
         upload_label = QLabel("Upload CSV File")
@@ -65,6 +69,44 @@ class EquipmentVisualizer(QWidget):
         upload.addWidget(upload_btn)
 
         main.addWidget(upload_card)
+
+        # History card (always visible on home)
+        self.history_card = self.card()
+        history_layout = QVBoxLayout(self.history_card)
+        history_layout.setSpacing(14)
+
+        history_title = QLabel("Recent Uploads")
+        history_title.setFont(QFont("Arial", 16, QFont.Bold))
+        history_layout.addWidget(history_title)
+
+        self.history_table = QTableWidget()
+        self.history_table.setColumnCount(5)
+        self.history_table.setHorizontalHeaderLabels(
+            ["Uploaded At", "Total", "Flowrate", "Pressure", "Temperature"]
+        )
+        self.history_table.horizontalHeader().setStretchLastSection(True)
+        history_layout.addWidget(self.history_table)
+        self.history_table.setFixedHeight(250)
+
+        main.addWidget(self.history_card)
+
+        # PDF Download card
+        pdf_card = self.card()
+        pdf_layout = QHBoxLayout(pdf_card)
+
+        pdf_label = QLabel("Download PDF Report")
+        pdf_label.setFont(QFont("Arial", 13))
+
+        pdf_btn = QPushButton("Download")
+        pdf_btn.setFixedSize(140, 40)
+        pdf_btn.setStyleSheet(self.button_style())
+        pdf_btn.clicked.connect(self.download_pdf)
+
+        pdf_layout.addWidget(pdf_label)
+        pdf_layout.addStretch()
+        pdf_layout.addWidget(pdf_btn)
+
+        main.addWidget(pdf_card)
 
         # OUTPUT (hidden initially)
         self.output_widget = QWidget()
@@ -132,60 +174,75 @@ class EquipmentVisualizer(QWidget):
             return
 
         try:
-            with open(path, newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                raw_headers = [h.strip().lower().replace(" ", "_") for h in reader.fieldnames]
+            # Step 1: Upload CSV to backend
+            with open(path, "rb") as f:
+                files = {"file": f}
+                upload_url = "http://127.0.0.1:8000/api/upload/"
+                res = requests.post(upload_url, files=files)
 
-                # Map flexible headers
-                header_map = {}
-                for h in raw_headers:
-                    if "type" in h:
-                        header_map[h] = "equipment_type"
-                    elif "flow" in h:
-                        header_map[h] = "flowrate"
-                    elif "press" in h:
-                        header_map[h] = "pressure"
-                    elif "temp" in h:
-                        header_map[h] = "temperature"
+            if res.status_code != 200:
+                raise ValueError("Upload failed. Please check the CSV format.")
 
-                required = ["equipment_type", "flowrate", "pressure", "temperature"]
-                if not all(r in header_map.values() for r in required):
-                    raise ValueError("CSV must contain: equipment_type, flowrate, pressure, temperature")
+            # Step 2: Get summary from backend
+            summary_url = "http://127.0.0.1:8000/api/summary/"
+            res = requests.get(summary_url)
+            if res.status_code != 200:
+                raise ValueError("Failed to fetch summary.")
 
-                rows = []
-                for row in reader:
-                    new_row = {}
-                    for raw_key, value in row.items():
-                        key = header_map.get(raw_key.strip().lower().replace(" ", "_"))
-                        if key:
-                            new_row[key] = value
-                    rows.append(new_row)
+            data = res.json()
 
-            total = len(rows)
-            avg_flow = sum(float(r["flowrate"]) for r in rows) / total
-            avg_press = sum(float(r["pressure"]) for r in rows) / total
-            avg_temp = sum(float(r["temperature"]) for r in rows) / total
+            # Step 3: Update labels
+            self.value_labels["Total Equipment"].setText(str(data["total_equipment"]))
+            self.value_labels["Avg Flowrate"].setText(f"{data['avg_flowrate']:.2f}")
+            self.value_labels["Avg Pressure"].setText(f"{data['avg_pressure']:.2f}")
+            self.value_labels["Avg Temperature"].setText(f"{data['avg_temperature']:.2f}")
 
-            self.type_counts = Counter(r["equipment_type"] for r in rows)
-
-            self.value_labels["Total Equipment"].setText(str(total))
-            self.value_labels["Avg Flowrate"].setText(f"{avg_flow:.2f}")
-            self.value_labels["Avg Pressure"].setText(f"{avg_press:.2f}")
-            self.value_labels["Avg Temperature"].setText(f"{avg_temp:.2f}")
-
+            # Step 4: Update charts
+            self.type_counts = data["type_distribution"]
             self.draw_type_chart()
-            self.draw_avg_chart(avg_flow, avg_press, avg_temp)
+            self.draw_avg_chart(
+                data["avg_flowrate"], data["avg_pressure"], data["avg_temperature"]
+            )
+            self.load_history()
 
-            # Ensure charts are visible again
+            # Show results
             self.type_card["card"].show()
             self.avg_card["card"].show()
-
-            # Hide upload section, show results
             self.upload_card.hide()
             self.output_widget.show()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+    
+    def load_history(self):
+        try:
+            history_url = "http://127.0.0.1:8000/api/history/"
+            res = requests.get(history_url)
+            if res.status_code != 200:
+                return
+
+            data = res.json()
+            self.history_table.setRowCount(len(data))
+
+            for i, item in enumerate(data):
+                timestamp = datetime.fromisoformat(item["uploaded_at"]).strftime("%Y-%m-%d %H:%M")
+                self.history_table.setItem(i, 0, QTableWidgetItem(timestamp))
+                self.history_table.setItem(i, 1, QTableWidgetItem(str(item["total_equipment"])))
+                self.history_table.setItem(i, 2, QTableWidgetItem(f"{item['avg_flowrate']:.2f}"))
+                self.history_table.setItem(i, 3, QTableWidgetItem(f"{item['avg_pressure']:.2f}"))
+                self.history_table.setItem(i, 4, QTableWidgetItem(f"{item['avg_temperature']:.2f}"))
+
+            self.history_table.setColumnWidth(0, 200)  # Uploaded At
+            self.history_table.setColumnWidth(1, 80)   # Total
+            self.history_table.setColumnWidth(2, 100)  # Flowrate
+            self.history_table.setColumnWidth(3, 100)  # Pressure
+            self.history_table.setColumnWidth(4, 100)  # Temperature
+
+        except Exception as e:
+            print("History fetch error:", e)
+    
+    def download_pdf(self):
+        webbrowser.open("http://127.0.0.1:8000/api/report/")
 
     def visual_card(self, title, color):
         card = self.card()
