@@ -2,10 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from .serializers import CSVUploadSerializer
+from .models import EquipmentSummary
 import pandas as pd
-
-# Global variable to store the last summary
-last_summary = None
 
 class UploadCSV(APIView):
     parser_classes = (MultiPartParser, FormParser)
@@ -26,17 +24,47 @@ class UploadCSV(APIView):
             "type_distribution": df["Type"].value_counts().to_dict()
         }
 
-        # Save summary globally so GET can access it
-        global last_summary
-        last_summary = summary
+        # Save to DB
+        EquipmentSummary.objects.create(**summary)
+
+        # Keep only last 5
+        qs = EquipmentSummary.objects.order_by('-uploaded_at')
+        if qs.count() > 5:
+            for old in qs[5:]:
+                old.delete()
 
         return Response(summary)
 
 
 class SummaryView(APIView):
     def get(self, request):
-        global last_summary
-        if last_summary:
-            return Response(last_summary)
+        latest = EquipmentSummary.objects.order_by('-uploaded_at').first()
+        if latest:
+            data = {
+                "total_equipment": latest.total_equipment,
+                "avg_flowrate": latest.avg_flowrate,
+                "avg_pressure": latest.avg_pressure,
+                "avg_temperature": latest.avg_temperature,
+                "type_distribution": latest.type_distribution,
+                "uploaded_at": latest.uploaded_at
+            }
+            return Response(data)
         else:
             return Response({"detail": "No summary available. Please upload a CSV first."})
+
+
+class HistoryView(APIView):
+    def get(self, request):
+        summaries = EquipmentSummary.objects.order_by('-uploaded_at')[:5]
+        data = [
+            {
+                "total_equipment": s.total_equipment,
+                "avg_flowrate": s.avg_flowrate,
+                "avg_pressure": s.avg_pressure,
+                "avg_temperature": s.avg_temperature,
+                "type_distribution": s.type_distribution,
+                "uploaded_at": s.uploaded_at
+            }
+            for s in summaries
+        ]
+        return Response(data)
