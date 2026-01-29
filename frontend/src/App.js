@@ -136,6 +136,10 @@ function App() {
     ]
   };
 
+  function handleDownloadPDF() {
+    window.open("http://127.0.0.1:8000/api/report/", "_blank");
+  }
+
   // JSX
   return (
     <div className="container">
@@ -218,13 +222,7 @@ function App() {
       </div>
       <div className="card">
         <h2>Download Report</h2>
-        <a
-          href="http://127.0.0.1:8000/api/report/"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <button>Download PDF Report</button>
-        </a>
+        <button onClick={handleDownloadPDF}>📑 Download PDF Report</button>
       </div>
     </div>
   );

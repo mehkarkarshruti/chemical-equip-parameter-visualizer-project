@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime
 import webbrowser
 
+
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QGridLayout, QFrame,
@@ -20,7 +21,6 @@ from matplotlib.figure import Figure
 class EquipmentVisualizer(QWidget):
     def __init__(self):
         super().__init__()
-        self.load_history()
         self.setWindowTitle("Chemical Equipment Parameter Visualizer")
         self.setMinimumSize(1200, 780)
         self.setStyleSheet("background-color: #f5f7fa;")
@@ -29,6 +29,8 @@ class EquipmentVisualizer(QWidget):
         self.type_counts = {}
 
         self.init_ui()
+        self.load_history()
+
 
     def init_ui(self):
         # Scroll area wrapper
