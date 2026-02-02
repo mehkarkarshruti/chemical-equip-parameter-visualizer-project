@@ -4,7 +4,8 @@
 
 ##### Overview
 
-Chemical Equipment Parameter Visualizer is a hybrid web + desktop application for analyzing chemical equipment data using CSV files.
+Chemical Equipment Parameter Visualizer is a hybrid Web + Desktop application powered by a single Django backend for analyzing chemical equipment data using CSV files. 
+
 
 It computes statistical summaries and visualizes parameters like flowrate, pressure, and temperature.
 
